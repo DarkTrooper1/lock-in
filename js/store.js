@@ -245,7 +245,8 @@ const setStatus = (state, message) => { syncStatus = { state, message }; emitSyn
 async function gh(path, { method = 'GET', body, accept = 'application/vnd.github+json', cfg = syncConfig() } = {}) {
   const url = path.startsWith('https://')
     ? path
-    : `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/${path}`;
+    // no trailing slash: GitHub redirects those, and browsers block redirects on authorised requests
+    : `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}${path ? '/' + path : ''}`;
   return fetch(url, {
     method,
     cache: 'no-store',
@@ -288,7 +289,7 @@ export async function testSync(cfg) {
     } catch {
       throw new Error("Can't reach GitHub from this browser. An ad blocker, privacy shield (e.g. Brave Shields), antivirus web filter or network block is stopping api.github.com. Turn it off for this site or try another browser.");
     }
-    throw new Error('GitHub rejected the request before it was sent. Re-copy the token: it should start with github_pat_ and contain no spaces.');
+    throw new Error('GitHub is reachable but this request failed. Re-copy the token (it should start with github_pat_) and check the username and repo name.');
   }
   if (r.status === 401) throw new Error('GitHub says the token is invalid or expired. Generate a new one and paste it again.');
   if (r.status === 404) throw new Error(`Repo ${cfg.owner}/${cfg.repo} not found. Check the spelling, that it exists, and that the token was given access to it.`);
