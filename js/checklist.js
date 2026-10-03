@@ -3,10 +3,11 @@ import * as S from './store.js';
 import { dow, addDays, ymd, nextTradingDay, fmtDate } from './util.js';
 
 // route: where the item is logged in the app. Items without one are just ticked off.
+// logOnly: can't be ticked by hand; only counts once it's actually logged.
 export const ITEMS = [
   { key: 'journal', label: "Journal today's trades", route: '#/journal' },
   { key: 'levels', label: 'Plot levels for next session' },
-  { key: 'workout', label: 'Workout', route: '#/workout' },
+  { key: 'workout', label: 'Workout', route: '#/workout', logOnly: true },
   { key: 'homework', label: 'Homework' },
   { key: 'backtest', label: 'Backtesting session', route: '#/backtest' },
 ];
@@ -64,7 +65,7 @@ export function isLogged(key, date) {
   return false;
 }
 
-export const isDone = (key, date) => isTicked(key, date) || isLogged(key, date);
+export const isDone = (key, date) => (!itemFor(key)?.logOnly && isTicked(key, date)) || isLogged(key, date);
 
 export function setTick(key, date, on) {
   const day = S.get('days', date) || { id: date, date };

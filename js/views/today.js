@@ -179,8 +179,9 @@ function itemHTML(i, date) {
     if (p > 0) extra = `<div class="progress" style="max-width:200px"><div style="width:${Math.round(p * 100)}%"></div></div>`;
   }
   // Logged items are done because of real data, so they can't be unticked here.
-  const attrs = logged ? '' : `data-tick="${esc(i.key)}" data-on="${i.done ? '1' : ''}" data-points="${i.points}" role="button" tabindex="0" aria-pressed="${i.done}"`;
-  return `<div class="check-item ${i.done ? 'done' : ''} ${logged ? '' : 'clickable'}" ${attrs}>
+  const attrs = logged || i.logOnly ? '' : `data-tick="${esc(i.key)}" data-on="${i.done ? '1' : ''}" data-points="${i.points}" role="button" tabindex="0" aria-pressed="${i.done}"`;
+  if (i.logOnly && !i.done && !extra) extra = '<div class="muted small">Log your reps to complete</div>';
+  return `<div class="check-item ${i.done ? 'done' : ''} ${logged || i.logOnly ? '' : 'clickable'}" ${attrs}>
     <div class="box" ${logged ? 'title="Logged in the app"' : ''}>${i.done ? '✓' : ''}</div>
     <div class="grow"><span class="title">${esc(i.label)}</span>${logged ? '<div class="muted small">Logged</div>' : ''}${extra}</div>
     ${!i.done && i.route ? `<a class="btn sm ghost" href="${i.route}">Log</a>` : ''}
