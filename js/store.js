@@ -278,7 +278,20 @@ function b64ToUtf8(b64) {
 }
 
 export async function testSync(cfg) {
-  const r = await gh('', { cfg });
+  let r;
+  try {
+    r = await gh('', { cfg });
+  } catch {
+    // Work out whether GitHub is unreachable or just this request was rejected.
+    try {
+      await fetch('https://api.github.com/zen', { cache: 'no-store' });
+    } catch {
+      throw new Error("Can't reach GitHub from this browser. An ad blocker, privacy shield (e.g. Brave Shields), antivirus web filter or network block is stopping api.github.com. Turn it off for this site or try another browser.");
+    }
+    throw new Error('GitHub rejected the request before it was sent. Re-copy the token: it should start with github_pat_ and contain no spaces.');
+  }
+  if (r.status === 401) throw new Error('GitHub says the token is invalid or expired. Generate a new one and paste it again.');
+  if (r.status === 404) throw new Error(`Repo ${cfg.owner}/${cfg.repo} not found. Check the spelling, that it exists, and that the token was given access to it.`);
   if (!r.ok) throw await ghError(r);
   const repo = await r.json();
   if (!repo.private) throw new Error('That repo is public. Use a PRIVATE repo for your data.');

@@ -109,7 +109,12 @@ export default function settings(el) {
   $('#sf', el).addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
-    const cfg = { owner: f.owner.value.trim(), repo: f.repo.value.trim(), token: f.token.value.trim() };
+    // forgive pasted URLs ("github.com/me/repo", "me/repo") and stray whitespace in the token
+    let owner = f.owner.value.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/^@/, '');
+    let repo = f.repo.value.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/, '');
+    if (repo.includes('/')) [owner, repo] = repo.split('/').slice(-2);
+    owner = owner.split('/')[0];
+    const cfg = { owner, repo, token: f.token.value.replace(/\s+/g, '') };
     if (!cfg.owner || !cfg.repo || !cfg.token) return toast('Fill in all three fields');
     try {
       await S.testSync(cfg);
@@ -117,7 +122,7 @@ export default function settings(el) {
       toast('Connected. Syncing…');
       await S.sync();
     } catch (err) {
-      toast(err.message, 5000);
+      toast(err.message, 10000);
     }
   });
   $('#sync-now', el)?.addEventListener('click', () => S.sync());
