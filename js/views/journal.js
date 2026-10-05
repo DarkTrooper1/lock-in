@@ -1,7 +1,7 @@
 import * as S from '../store.js';
 import { $, $$, esc, ymd, fmtDate, money, pnlClass, num, fixed, sum, parseCSV, parseDateTime, instrumentFromSymbol } from '../util.js';
 import { openModal, modalHead, toast, chipsHTML, bindChips, readChips, segHTML, bindSeg, readSeg, imagePicker, thumbsHTML, bindThumbs, options, kpi } from '../ui.js';
-import { grossPnl, rMultiple, points, sortTrades, summarize } from '../trading.js';
+import { grossPnl, rMultiple, points, sortTrades, summarize, stopPoints, riskDollars } from '../trading.js';
 
 export default function journal(el, params) {
   const month = params.month || ymd().slice(0, 7);
@@ -106,6 +106,10 @@ export function openTradeForm(trade) {
   };
   const computedNow = grossPnl(t) != null ? grossPnl(t) - (t.fees || 0) : null;
   const manual = t.pnl != null && computedNow != null && Math.abs(computedNow - t.pnl) > 0.01;
+  // Stop can be typed as a distance in points (default) or as the actual stop price.
+  const stopMode = t.stopMode || (t.stopPts == null && t.stop != null && t.entry != null && t.stop >= t.entry / 2 ? 'price' : 'pts');
+  const stopValue = stopMode === 'pts' ? stopPoints(t) : t.stop;
+  const STOP_HINT = { pts: 'e.g. 10 = 10 points away', price: 'e.g. 21440.25' };
 
   const m = openModal(`
     ${modalHead(isNew ? 'Add trade' : 'Edit trade')}
@@ -124,7 +128,9 @@ export function openTradeForm(trade) {
         <label class="field">Contracts<input type="number" name="qty" min="1" step="1" value="${esc(t.qty ?? '')}"></label>
         <label class="field">Entry<input type="number" name="entry" step="0.25" value="${esc(t.entry ?? '')}"></label>
         <label class="field">Exit<input type="number" name="exit" step="0.25" value="${esc(t.exit ?? '')}"></label>
-        <label class="field">Stop<input type="number" name="stop" step="0.25" value="${esc(t.stop ?? '')}" placeholder="for R"></label>
+        <div class="field" style="font-size:12px;color:var(--muted);font-weight:700;display:flex;flex-direction:column;gap:6px">
+          <span class="row between" style="gap:6px">Stop loss ${segHTML('stopMode', [['pts', 'Points'], ['price', 'Price']], stopMode)}</span>
+          <input type="number" name="stop" step="0.25" min="0" value="${esc(stopValue ?? '')}" placeholder="${STOP_HINT[stopMode]}"></div>
         <label class="field">Fees ($)<input type="number" name="fees" step="0.01" value="${esc(t.fees ?? '')}"></label>
         <label class="field">Net P&L ($)<input type="number" name="pnl" step="0.01" value="${esc(t.pnl ?? '')}" ${manual ? 'data-manual="1"' : ''}></label>
       </div>
@@ -153,13 +159,33 @@ export function openTradeForm(trade) {
       ...t,
       date: fd.get('date'), time: fd.get('time'), exitTime: fd.get('exitTime'), account: fd.get('account'),
       instrument: readSeg(f, 'instrument'), side: readSeg(f, 'side'),
-      qty: num(fd.get('qty')), entry: num(fd.get('entry')), exit: num(fd.get('exit')), stop: num(fd.get('stop')),
+      qty: num(fd.get('qty')), entry: num(fd.get('entry')), exit: num(fd.get('exit')), ...readStop(fd),
       fees: num(fd.get('fees')), pnl: num(fd.get('pnl')),
       setup: fd.get('setup').trim(), followedPlan: readSeg(f, 'followedPlan'),
       emotions: readChips(f, 'emotions'), mistakes: readChips(f, 'mistakes'),
       notes: fd.get('notes'), images: pics.get(),
     };
   };
+  function readStop(fd) {
+    const mode = readSeg(f, 'stopMode') || 'pts';
+    const v = num(fd.get('stop'));
+    const entry = num(fd.get('entry'));
+    const long = readSeg(f, 'side') !== 'short';
+    if (v == null) return { stopMode: mode, stop: null, stopPts: null };
+    if (mode === 'pts') return { stopMode: mode, stopPts: Math.abs(v), stop: entry != null ? entry + (long ? -Math.abs(v) : Math.abs(v)) : null };
+    return { stopMode: mode, stop: v, stopPts: entry != null ? Math.abs(entry - v) : null };
+  }
+  // switching units converts the number already typed
+  $('[data-seg="stopMode"]', f).addEventListener('change', () => {
+    const mode = readSeg(f, 'stopMode');
+    const input = f.elements.stop;
+    const entry = num(f.elements.entry.value);
+    const v = num(input.value);
+    const long = readSeg(f, 'side') !== 'short';
+    if (v != null && entry != null) input.value = mode === 'pts' ? Math.abs(entry - v) : entry + (long ? -v : v);
+    input.placeholder = STOP_HINT[mode];
+  });
+
   const pnlInput = f.elements.pnl;
   pnlInput.addEventListener('input', () => (pnlInput.dataset.manual = pnlInput.value === '' ? '' : '1'));
   const recalc = () => {
@@ -167,8 +193,14 @@ export function openTradeForm(trade) {
     const g = grossPnl(d);
     if (g != null && !pnlInput.dataset.manual) pnlInput.value = (g - (d.fees || 0)).toFixed(2);
     const pts = points(d);
-    const r = rMultiple({ ...d, pnl: num(pnlInput.value) });
-    $('#calc', f).textContent = [pts != null ? `${fixed(pts, 2)} pts` : '', r != null ? `${fixed(r, 2)}R` : ''].filter(Boolean).join(' · ');
+    const withPnl = { ...d, pnl: num(pnlInput.value) };
+    const r = rMultiple(withPnl);
+    const sp = stopPoints(withPnl), risk = riskDollars(withPnl);
+    $('#calc', f).innerHTML = [
+      pts != null ? `Result <b>${fixed(pts, 2)} pts</b>` : '',
+      sp != null && risk != null ? `Risk <b>${fixed(sp, 2)} pts = ${money(risk)}</b>` : '',
+      r != null ? `<b class="${pnlClass(r)}">${fixed(r, 2)}R</b>` : '',
+    ].filter(Boolean).join(' · ') || 'Fill in entry, exit, contracts and stop to see points, risk and R.';
   };
   f.addEventListener('input', recalc);
   f.addEventListener('change', recalc);

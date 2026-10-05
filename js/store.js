@@ -1,6 +1,7 @@
 // Local-first data store. Everything lives in localStorage (records) and
 // IndexedDB (screenshots), and is synced to a private GitHub repo you own.
 import { uid, ymd, debounce } from './util.js';
+import { DEFAULT_PLAN } from './workout-plan.js';
 
 const LS_DATA = 'lockin.data.v1';
 const LS_SYNC = 'lockin.sync.v1';
@@ -28,10 +29,14 @@ export const DEFAULT_SETTINGS = {
   checklist: {
     journal: { on: true, days: [1, 2, 3, 4, 5] },
     levels: { on: true, days: [0, 1, 2, 3, 4] },
-    workout: { on: true, days: [0, 1, 2, 3, 4, 5, 6] },
+    workout: { on: true, days: [1, 2, 3, 4, 5, 6] },
     homework: { on: true, days: [0, 1, 2, 3, 4] },
-    backtest: { on: true, days: [1, 2, 3, 4, 5] },
+    backtest: { on: true, days: [6] },
   },
+  settingsVersion: 2,
+  // [{from: 'YYYY-MM-DD', checklist}] so changing your list never rewrites past days' points
+  checklistHistory: [],
+  workoutPlan: DEFAULT_PLAN,
   customItems: [],
   payoutPoints: 500,
   gymBonus: 100,
@@ -53,9 +58,27 @@ function normalize(d) {
   d.collections = d.collections || {};
   for (const c of COLLECTIONS) d.collections[c] = d.collections[c] || {};
   const s = d.settings || {};
+  const existing = Object.keys(s).length > 0;
   d.settings = { ...structuredClone(DEFAULT_SETTINGS), ...s };
   d.settings.checklist = { ...structuredClone(DEFAULT_SETTINGS.checklist), ...(s.checklist || {}) };
+  if (existing && (s.settingsVersion || 1) < 2) migrateToV2(d.settings);
   return d;
+}
+
+// v2 (5 Oct 2026): weekly workout plan with Sunday rest, backtesting on Saturdays.
+// The old list is kept for days before the change so past points don't move.
+// Fixed date + tiny updatedAt bump so every device migrates identically.
+const V2_FROM = '2026-10-05';
+function migrateToV2(set) {
+  const old = structuredClone(set.checklist);
+  const next = structuredClone(old);
+  next.workout = { ...next.workout, days: [1, 2, 3, 4, 5, 6] };
+  next.backtest = { on: true, days: [6] };
+  set.checklistHistory = [{ from: '0000-00-00', checklist: old }, { from: V2_FROM, checklist: next }];
+  set.checklist = next;
+  set.workoutPlan = structuredClone(DEFAULT_PLAN);
+  set.settingsVersion = 2;
+  set.updatedAt = (set.updatedAt || 0) + 1;
 }
 
 function loadLocal() {

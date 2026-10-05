@@ -1,7 +1,7 @@
 import * as S from '../store.js';
 import { $, $$, esc, ymd, fmtDate, addDays, parseYmd, money, num, sum, uid, DAY_NAMES } from '../util.js';
 import { dayStatus, streak, lastMissed, workoutProgress, isLogged, setTick, allItems } from '../checklist.js';
-import { PERFECT_DAY_BONUS, STREAK_BONUSES, dayPotential, dailyPoints, activeGoal, goalProgress, payoutPoints, gymBonus, GYM_SESSIONS } from '../points.js';
+import { PERFECT_DAY_BONUS, STREAK_BONUSES, dayPotential, dailyPoints, activeGoal, goalProgress, payoutPoints, gymBonus, GYM_SESSIONS, earlyBigWinPoints } from '../points.js';
 import { openModal, modalHead, toast, options } from '../ui.js';
 import { ICONS } from '../icons.js';
 
@@ -21,7 +21,9 @@ export default function today(el) {
   const potential = dayPotential(status);
   const hit = S.all('goals').filter((g) => g.claimedOn);
   const nextBonus = STREAK_BONUSES.map((b) => ({ ...b, in: b.every - (st % b.every) })).sort((a, b) => a.in - b.in)[0];
-  const bigPts = sum(bigEntries().filter((e) => e.date >= (goal?.startDate || '0000') && e.date <= date), (e) => e.points);
+  const bigPts = goal
+    ? sum(bigEntries().filter((e) => e.date >= goal.startDate && e.date <= date), (e) => e.points) + earlyBigWinPoints(goal)
+    : sum(bigEntries(), (e) => e.points);
 
   el.innerHTML = `
     <div class="home">
@@ -180,7 +182,7 @@ function itemHTML(i, date) {
   }
   // Logged items are done because of real data, so they can't be unticked here.
   const attrs = logged || i.logOnly ? '' : `data-tick="${esc(i.key)}" data-on="${i.done ? '1' : ''}" data-points="${i.points}" role="button" tabindex="0" aria-pressed="${i.done}"`;
-  if (i.logOnly && !i.done && !extra) extra = '<div class="muted small">Log your reps to complete</div>';
+  if (i.logOnly && !i.done && !extra) extra = '<div class="muted small">Tick off your sets in the Workout tab</div>';
   return `<div class="check-item ${i.done ? 'done' : ''} ${logged || i.logOnly ? '' : 'clickable'}" ${attrs}>
     <div class="box" ${logged ? 'title="Logged in the app"' : ''}>${i.done ? '✓' : ''}</div>
     <div class="grow"><span class="title">${esc(i.label)}</span>${logged ? '<div class="muted small">Logged</div>' : ''}${extra}</div>
@@ -234,7 +236,7 @@ function drawChart(el, goal, date) {
   const labels = [];
   for (let d = from; d <= to; d = addDays(d, 1)) labels.push(d);
 
-  let running = goal && from > goal.startDate ? goalProgress(goal, addDays(from, -1)).earned : 0;
+  let running = goal ? goalProgress(goal, addDays(from, -1)).earned : 0;
   const cumulative = labels.map((d) => (days.has(d) ? (running += days.get(d).pts) : null));
   const bars = labels.map((d) => days.get(d)?.pts ?? null);
   const barColors = labels.map((d) => {
@@ -316,7 +318,7 @@ function openGoal(goal) {
         <label class="field">Points<input name="target" type="number" min="100" step="100" value="${esc(goal?.target || 10000)}" required></label>
         <label class="field">Deadline (optional)<input name="deadline" type="date" value="${esc(goal ? goal.deadline || '' : addDays(ymd(), 89))}"></label>
       </div>
-      <p class="muted small">A perfect week is about 730 points, including the 7-day streak bonus. 3 flawless months, with their 30-day streak bonuses, is about 11,000.
+      <p class="muted small">A perfect week is about 655 points, including the 7-day streak bonus. 3 flawless months, with their 30-day streak bonuses, is about 10,000.
         One missed day costs you streak bonuses, so 10,000 means almost never slipping, plus payouts (+${payoutPoints()}) and big wins.${isNew ? ' Points count from today.' : ''}</p>
       <div class="modal-foot"><div>${isNew ? '' : '<button type="button" class="danger" id="del">Delete goal</button>'}</div>
         <div class="row tight"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></div>

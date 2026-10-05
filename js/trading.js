@@ -15,10 +15,22 @@ export function points(t) {
 }
 
 // R multiple, only when a stop was recorded.
+// Stop distance in points. Trades store stopPts; older ones only have a stop
+// price, and some of those were really a points distance typed into the price box.
+export function stopPoints(t) {
+  if (t.stopPts != null) return Math.abs(t.stopPts);
+  if (t.stop == null || t.entry == null) return null;
+  return t.stop < t.entry / 2 ? Math.abs(t.stop) : Math.abs(t.entry - t.stop);
+}
+
+export function riskDollars(t) {
+  const pts = stopPoints(t);
+  return pts && t.qty ? pts * t.qty * pointValue(t.instrument) : null;
+}
+
 export function rMultiple(t) {
-  if (t.stop == null || t.entry == null || !t.qty || t.pnl == null) return null;
-  const risk = Math.abs(t.entry - t.stop) * t.qty * pointValue(t.instrument);
-  return risk > 0 ? t.pnl / risk : null;
+  const risk = riskDollars(t);
+  return risk > 0 && t.pnl != null ? t.pnl / risk : null;
 }
 
 export const sortTrades = (arr) =>

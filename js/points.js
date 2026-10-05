@@ -77,7 +77,15 @@ export function activeGoal() {
   return S.all('goals').filter((g) => !g.claimedOn).sort((a, b) => b.createdAt - a.createdAt)[0] || null;
 }
 
+// Payouts and big wins dated before the goal started still count toward it,
+// unless they were logged before a previous goal was claimed (that goal had them).
+export function earlyBigWinPoints(goal) {
+  const prevClaim = Math.max(0, ...S.all('goals').filter((g) => g.claimedOn && g.id !== goal.id && g.createdAt < goal.createdAt).map((g) => g.updatedAt || 0));
+  const early = (r) => r.date < goal.startDate && (r.createdAt || 0) > prevClaim;
+  return S.all('payouts').filter(early).length * payoutPoints() + S.all('wins').filter(early).reduce((a, w) => a + (w.points || 0), 0);
+}
+
 export function goalProgress(goal, today = ymd()) {
-  const earned = pointsBetween(goal.startDate, today).total;
+  const earned = pointsBetween(goal.startDate, today).total + earlyBigWinPoints(goal);
   return { earned, pct: Math.min(1, earned / (goal.target || 1)), reached: earned >= goal.target };
 }

@@ -1,7 +1,8 @@
 import * as S from '../store.js';
 import { $, $$, esc, ymd, num, uid, DAY_NAMES } from '../util.js';
 import { toast } from '../ui.js';
-import { ITEMS, ITEM_POINTS, ALLOWED_DAYS } from '../checklist.js';
+import { ITEMS, ITEM_POINTS, ALLOWED_DAYS, setChecklist } from '../checklist.js';
+import { DEFAULT_PLAN } from '../workout-plan.js';
 import { openCustomItem } from './today.js';
 
 const LISTS = [
@@ -70,11 +71,13 @@ export default function settings(el) {
       </div>
 
       <div class="card">
-        <h2>Workout routine</h2>
-        <div class="stack" id="routine" style="gap:8px">
-          ${set.routine.map((ex) => routineRow(ex)).join('')}
+        <h2>Workout plan</h2>
+        <p class="muted small">One exercise per line: <span class="mono">Name | sets | reps | tip</span>. Leave a day empty to make it a rest day.
+          Changes apply to days you haven't started logging yet.</p>
+        <div class="stack" style="gap:8px">
+          ${[1, 2, 3, 4, 5, 6, 0].map((n) => planDayHTML(n, (set.workoutPlan || {})[n])).join('')}
         </div>
-        <div class="row tight" style="margin-top:10px"><button type="button" id="add-ex">+ Exercise</button><button class="primary" id="save-routine">Save routine</button></div>
+        <div class="row tight" style="margin-top:10px"><button class="primary" id="save-plan">Save plan</button><button class="ghost" id="reset-plan">Reset to default plan</button></div>
       </div>
     </div>
 
@@ -134,7 +137,8 @@ export default function settings(el) {
   $$('[data-item]', el).forEach((row) => {
     const save = () => {
       const days = $$('.chip.on', row).map((c) => Number(c.dataset.day));
-      S.saveSettings({ checklist: { ...S.settings().checklist, [row.dataset.item]: { on: $('[data-on]', row).checked, days } } });
+      // applies from today on; earlier days keep the list they had
+      setChecklist({ ...S.settings().checklist, [row.dataset.item]: { on: $('[data-on]', row).checked, days } });
     };
     $('[data-on]', row).addEventListener('change', save);
     $$('[data-day]:not([disabled])', row).forEach((c) => c.addEventListener('click', () => { c.classList.toggle('on'); save(); }));
@@ -154,19 +158,23 @@ export default function settings(el) {
     toast(`Saved ${winTypes.length} big win${winTypes.length === 1 ? '' : 's'}`);
   };
 
-  // routine
-  const bindRemove = () => $$('[data-rm-ex]', el).forEach((b) => (b.onclick = () => b.closest('.ex-row').remove()));
-  bindRemove();
-  $('#add-ex', el).onclick = () => {
-    $('#routine', el).insertAdjacentHTML('beforeend', routineRow({ id: uid(), name: '', target: 20 }));
-    bindRemove();
+  // workout plan
+  $('#save-plan', el).onclick = () => {
+    const plan = {};
+    $$('[data-plan-day]', el).forEach((box) => {
+      const n = Number(box.dataset.planDay);
+      const prev = (S.settings().workoutPlan || {})[n] || {};
+      const exercises = parsePlanLines($('textarea', box).value, prev.exercises || []);
+      const name = $('input', box).value.trim() || (exercises.length ? 'Workout' : 'Rest day');
+      plan[n] = exercises.length ? { name, exercises } : { name, rest: true, exercises: [], note: prev.note };
+    });
+    S.saveSettings({ workoutPlan: plan });
+    toast('Workout plan saved');
   };
-  $('#save-routine', el).onclick = () => {
-    const routine = $$('.ex-row', el)
-      .map((r) => ({ id: r.dataset.id, name: $('[data-name]', r).value.trim(), target: num($('[data-target]', r).value) || 0 }))
-      .filter((x) => x.name && x.target > 0);
-    S.saveSettings({ routine });
-    toast('Routine saved');
+  $('#reset-plan', el).onclick = () => {
+    if (!confirm('Replace your plan with the default home plan?')) return;
+    S.saveSettings({ workoutPlan: structuredClone(DEFAULT_PLAN) });
+    toast('Default plan restored');
   };
 
   // defaults
@@ -202,11 +210,26 @@ export default function settings(el) {
   };
 }
 
-function routineRow(ex) {
-  return `<div class="ex-row row tight" data-id="${esc(ex.id)}">
-    <input data-name value="${esc(ex.name)}" placeholder="Exercise" style="flex:1">
-    <input data-target type="number" min="1" value="${esc(ex.target)}" style="width:90px">
-    <span class="muted small">reps</span>
-    <button type="button" class="ghost danger sm" data-rm-ex>✕</button>
-  </div>`;
+const DAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function planDayHTML(n, day = { name: 'Rest day', exercises: [] }) {
+  const lines = (day.exercises || []).map((ex) => [ex.name, ex.sets, ex.reps, ex.tip].filter((x) => x != null && x !== '').join(' | ')).join('\n');
+  return `<details data-plan-day="${n}" style="border:1px solid var(--line);border-radius:12px;padding:10px 12px">
+    <summary style="cursor:pointer;font-weight:700">${DAY_LONG[n]} <span class="muted small" style="font-weight:600">· ${esc(day.name)}${day.exercises?.length ? ` · ${day.exercises.length} exercises` : ''}</span></summary>
+    <div class="stack" style="gap:8px;margin-top:10px">
+      <input value="${esc(day.name)}" placeholder="Day name, e.g. Legs">
+      <textarea rows="6" style="font-family:var(--mono);font-size:12px">${esc(lines)}</textarea>
+    </div>
+  </details>`;
+}
+
+// "Push-ups | 3 | 10–15 | tip" lines -> exercises, keeping ids stable for unchanged names
+function parsePlanLines(text, prev) {
+  const used = new Set();
+  return text.split('\n').map((line) => line.split('|').map((x) => x.trim())).filter(([name]) => name).map(([name, sets, reps, tip]) => {
+    let id = prev.find((e) => e.name === name)?.id || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || uid();
+    while (used.has(id)) id += '-2';
+    used.add(id);
+    return { id, name, sets: Math.max(1, Math.min(10, num(sets) || 3)), reps: reps || '10', ...(tip ? { tip } : {}) };
+  });
 }
